@@ -108,17 +108,9 @@ body {
   font-weight: 700;
 }
 
-.stat-value.added {
-  color: var(--text-added);
-}
-
-.stat-value.removed {
-  color: var(--text-removed);
-}
-
-.stat-value.neutral {
-  color: var(--accent-blue);
-}
+.stat-value.added { color: var(--text-added); }
+.stat-value.removed { color: var(--text-removed); }
+.stat-value.neutral { color: var(--accent-blue); }
 
 .stat-label {
   font-size: 0.75rem;
@@ -229,10 +221,5 @@ body {
   line-height: 1.5;
 }
 
-.log-line.error {
-  color: var(--text-removed);
-}
-
-.log-line.info {
-  color: var(--text-muted);
-}
+.log-line.error { color: var(--text-removed); }
+.log-line.info { color: var(--text-muted); }

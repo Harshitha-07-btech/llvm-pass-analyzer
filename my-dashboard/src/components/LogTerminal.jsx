@@ -1,6 +1,7 @@
 import React from 'react';
 
 export default function LogTerminal({ logs, onClearLogs }) {
+    // Gracefully default to an empty array just in case
     const safeLogs = logs || [];
 
     return (

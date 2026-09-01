@@ -1,8 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from typing import List
 import os
 import difflib
+import re
 
 app = FastAPI()
 
@@ -15,11 +17,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mock passes catalog
-PASSES = [
-    {"id": 1, "name": "Mem2Reg: Promote Memory to Register"},
-    {"id": 2, "name": "InstCombine: Combine Instructions"}
-]
+# Dynamic passes catalog cache
+PASSES = []
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 
@@ -71,16 +70,22 @@ def get_passes():
 @app.get("/api/pass/{pass_id}")
 def get_pass_data(pass_id: int):
     """Endpoint computing the diff between before/after IR for the requested pass."""
-    # Check if pass exists in our mock data
     pass_info = next((p for p in PASSES if p["id"] == pass_id), None)
     if not pass_info:
         raise HTTPException(status_code=404, detail="Pass not found")
         
-    before_file = f"pass_{pass_id}_before.ll"
-    after_file  = f"pass_{pass_id}_after.ll"
-    
-    before_lines = read_file_lines(before_file)
-    after_lines = read_file_lines(after_file)
+    if "code_block" in pass_info:
+        # Dynamically determine 'before' lines based on the previous pass memory
+        prev_info = next((p for p in PASSES if p["id"] == pass_id - 1), None)
+        before_lines = prev_info["code_block"].split('\n') if prev_info else []
+        after_lines = pass_info["code_block"].split('\n')
+    else:
+        # Fallback to the hardcoded text files for mock data
+        before_file = f"pass_{pass_id}_before.ll"
+        after_file  = f"pass_{pass_id}_after.ll"
+        
+        before_lines = read_file_lines(before_file)
+        after_lines = read_file_lines(after_file)
     
     original_code, modified_code, added, removed = get_diffed_lines(before_lines, after_lines)
     
@@ -92,4 +97,64 @@ def get_pass_data(pass_id: int):
         "net_change": added - removed,
         "original_code": original_code,
         "modified_code": modified_code
+    }
+
+class LogPayload(BaseModel):
+    # Support 'raw_logs' or 'logs' depending on frontend execution preferences
+    logs: str = None
+    raw_logs: str = None
+
+@app.post("/api/upload-logs")
+def upload_logs(payload: LogPayload):
+    global PASSES
+    content = payload.raw_logs if payload.raw_logs else payload.logs
+    content_length = len(content) if content else 0
+    
+    # Standard output explicitly confirming to standard UI flow
+    print(f"\n[SERVER] Successfully received LLVM log payload! Total characters: {content_length}")
+    
+    if content:
+        # More flexible match pattern parsing all available pass headers
+        pattern = r"\*\*\* IR Dump After (.*?)\s*\*\*\*"
+        parts = re.split(pattern, content)
+        
+        new_passes = []
+        
+        if len(parts) == 1:
+            # Fallback for unformatted raw dumps
+            new_passes.append({
+                "id": 1,
+                "name": "Raw LLVM Dump (Unparsed)",
+                "pass_name": "Raw Output",
+                "target_function": "Unknown",
+                "code_block": content.strip()
+            })
+        else:
+            pass_id_counter = 1
+            for i in range(1, len(parts), 2):
+                if i + 1 < len(parts):
+                    full_pass_desc = parts[i].strip()
+                    code_block = parts[i+1].strip()
+                    
+                    if " on " in full_pass_desc:
+                        p_name, t_func = full_pass_desc.split(" on ", 1)
+                    else:
+                        p_name = full_pass_desc
+                        t_func = "module"
+                        
+                    new_passes.append({
+                        "id": pass_id_counter,
+                        "name": full_pass_desc,
+                        "pass_name": p_name.strip(),
+                        "target_function": t_func.strip(),
+                        "code_block": code_block
+                    })
+                    pass_id_counter += 1
+                
+        PASSES = new_passes
+        print(f"[SERVER] Regex mapped {len(PASSES)} individual passes into structured JSON.")
+    
+    return {
+        "status": "success",
+        "message": f"Successfully received {content_length} characters and cached {len(PASSES)} passes."
     }
