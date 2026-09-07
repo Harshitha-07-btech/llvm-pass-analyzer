@@ -21,7 +21,7 @@
 body {
   background-color: var(--bg-main);
   color: var(--text-main);
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', 'sans-serif';
   height: 100vh;
   margin: 0;
   overflow: hidden;
@@ -30,15 +30,16 @@ body {
 .dashboard-container {
   display: flex;
   height: 100vh;
+  width: 100vw;
 }
 
-/* Sidebar Styling */
 .sidebar {
   width: 300px;
   background-color: var(--bg-sidebar);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
 }
 
 .sidebar-header {
@@ -46,7 +47,6 @@ body {
   font-size: 1.1rem;
   font-weight: 600;
   border-bottom: 1px solid var(--border-color);
-  letter-spacing: 0.5px;
 }
 
 .pass-list {
@@ -62,7 +62,6 @@ body {
   border-radius: 6px;
   cursor: pointer;
   color: var(--text-muted);
-  transition: all 0.2s;
 }
 
 .pass-item:hover {
@@ -72,18 +71,16 @@ body {
 
 .pass-item.active {
   background-color: var(--accent-blue);
-  color: #ffffff;
-  font-weight: 500;
+  color: #fff;
 }
 
-/* Main Workspace */
 .main-area {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
-/* Stats Panel */
 .stats-panel {
   display: flex;
   align-items: center;
@@ -108,16 +105,21 @@ body {
   font-weight: 700;
 }
 
-.stat-value.added { color: var(--text-added); }
-.stat-value.removed { color: var(--text-removed); }
-.stat-value.neutral { color: var(--accent-blue); }
+.stat-value.added {
+  color: var(--text-added);
+}
+
+.stat-value.removed {
+  color: var(--text-removed);
+}
+
+.stat-value.neutral {
+  color: var(--accent-blue);
+}
 
 .stat-label {
   font-size: 0.75rem;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-top: 4px;
 }
 
 .nav-buttons {
@@ -132,20 +134,25 @@ body {
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
-  font-weight: 500;
-  transition: all 0.2s;
 }
 
-.nav-btn:hover {
+.nav-btn:hover:not(:disabled) {
   background-color: var(--accent-blue);
-  border-color: var(--accent-blue);
 }
 
-/* Code Viewer */
 .code-viewer-container {
   flex: 1;
   display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.split-screen-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
   overflow: hidden;
+  min-width: 0;
 }
 
 .code-pane {
@@ -153,6 +160,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  min-width: 0;
 }
 
 .code-pane.left {
@@ -171,7 +179,8 @@ body {
   flex: 1;
   padding: 16px;
   overflow-y: auto;
-  font-family: 'Fira Code', 'Courier New', monospace;
+  overflow-x: auto;
+  font-family: monospace;
   font-size: 0.95rem;
   line-height: 1.6;
   white-space: pre;
@@ -179,7 +188,6 @@ body {
 
 .code-line {
   display: block;
-  padding: 0 4px;
 }
 
 .code-line.added {
@@ -192,7 +200,6 @@ body {
   color: var(--text-removed);
 }
 
-/* Log Terminal */
 .log-terminal {
   height: 220px;
   background-color: #000;
@@ -215,11 +222,16 @@ body {
   flex: 1;
   padding: 12px 16px;
   overflow-y: auto;
-  font-family: 'Fira Code', 'Courier New', monospace;
+  overflow-x: auto;
+  font-family: monospace;
   font-size: 0.9rem;
   color: #A3BE8C;
-  line-height: 1.5;
 }
 
-.log-line.error { color: var(--text-removed); }
-.log-line.info { color: var(--text-muted); }
+.log-line.error {
+  color: var(--text-removed);
+}
+
+.log-line.info {
+  color: var(--text-muted);
+}

@@ -15,7 +15,6 @@ export default function App() {
     setLogs(prev => [...prev, { type, msg }]);
   };
 
-  // 1. Fetch available passes on mount
   useEffect(() => {
     fetch('http://127.0.0.1:8000/api/passes')
       .then(res => res.json())
@@ -28,27 +27,25 @@ export default function App() {
       })
       .catch(err => {
         console.error(err);
-        addLog('[ERROR] Failed to fetch passes from backend.', 'error');
+        addLog('[ERROR] Failed to fetch passes.', 'error');
       });
   }, []);
 
-  // 2. Fetch specific pass data when activePassId changes
   useEffect(() => {
     if (!activePassId) return;
-
     setLoading(true);
-    addLog(`[INFO] Fetching data for Pass #${activePassId}...`);
+    addLog(`[INFO] Pulling data for Pass #${activePassId}...`);
 
     fetch(`http://127.0.0.1:8000/api/pass/${activePassId}`)
       .then(res => res.json())
       .then(data => {
         setPassData(data);
         setLoading(false);
-        addLog(`[SUCCESS] Pass #${activePassId} loaded! Net change: ${data.net_change} lines.`);
+        addLog(`[SUCCESS] Loaded Pass #${activePassId}`);
       })
       .catch(err => {
         console.error(err);
-        addLog(`[ERROR] Failed to fetch data for Pass #${activePassId}`, 'error');
+        addLog(`[ERROR] Failed to load Pass #${activePassId}`, 'error');
         setLoading(false);
       });
   }, [activePassId]);
@@ -79,9 +76,9 @@ export default function App() {
         onSelectPass={setActivePassId}
       />
 
-      <div className="main-area">
+      <div className="main-area" style={{ minWidth: 0 }}>
         {loading || !passData ? (
-          <div style={{ padding: 20, color: '#94A3B8' }}>Loading Data...</div>
+          <div style={{ padding: 20 }}>Loading Data from Python...</div>
         ) : (
           <>
             <StatsPanel
@@ -93,6 +90,7 @@ export default function App() {
               onStepForward={handleStepForward}
               onStepBackward={handleStepBackward}
             />
+            {/* The CodeViewer component properly rendering instead of the old setup */}
             <CodeViewer
               originalCode={passData.original_code}
               modifiedCode={passData.modified_code}

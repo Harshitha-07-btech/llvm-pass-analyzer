@@ -1,14 +1,18 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
+from typing import List, Dict, Any
+from google import genai
+from dotenv import load_dotenv
 import os
 import difflib
 import re
 
+# Safely load the environment variables from the .env file
+load_dotenv()
+
 app = FastAPI()
 
-# Allow React frontend to fetch data without CORS errors
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,66 +31,52 @@ def read_file_lines(filename: str) -> List[str]:
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail=f"File {filename} not found.")
     with open(filepath, 'r') as f:
-        # Read lines and strip trailing newlines to make diffing cleaner
         return [line.rstrip('\n') for line in f.readlines()]
 
 def get_diffed_lines(before_lines: List[str], after_lines: List[str]):
-    """
-    Perform a unified diff and parse the results into structured objects.
-    We return two explicitly labeled lists for Original and Modified IR.
-    """
     original_ir = []
     modified_ir = []
-    
     lines_added = 0
     lines_removed = 0
-    
-    # We use ndiff because it gives meticulous line-by-line differences
     diff = list(difflib.ndiff(before_lines, after_lines))
-    
     for line in diff:
         code = line[:2]
         text = line[2:]
-        
-        if code == '  ': # Line is identical in both
+        if code == '  ':
             original_ir.append({"text": text, "status": "neutral"})
             modified_ir.append({"text": text, "status": "neutral"})
-        elif code == '- ': # Line was removed from original
+        elif code == '- ':
             original_ir.append({"text": text, "status": "removed"})
             lines_removed += 1
-        elif code == '+ ': # Line was added to modified
+        elif code == '+ ':
             modified_ir.append({"text": text, "status": "added"})
             lines_added += 1
-        elif code == '? ': # Intellisense hint from ndiff, skip it
+        elif code == '? ':
             continue
-            
     return original_ir, modified_ir, lines_added, lines_removed
 
 @app.get("/api/passes")
 def get_passes():
-    """Endpoint serving the pass list for the Sidebar."""
+    """Endpoint serving the cached dynamic pass list for the UI Sidebar."""
     return PASSES
 
 @app.get("/api/pass/{pass_id}")
 def get_pass_data(pass_id: int):
-    """Endpoint computing the diff between before/after IR for the requested pass."""
+    """Endpoint isolating the correct code payload for the requested pass."""
     pass_info = next((p for p in PASSES if p["id"] == pass_id), None)
     if not pass_info:
         raise HTTPException(status_code=404, detail="Pass not found")
         
     if "code_block" in pass_info:
-        # Dynamically determine 'before' lines based on the previous pass memory
         prev_info = next((p for p in PASSES if p["id"] == pass_id - 1), None)
         before_lines = prev_info["code_block"].split('\n') if prev_info else []
         after_lines = pass_info["code_block"].split('\n')
     else:
-        # Fallback to the hardcoded text files for mock data
         before_file = f"pass_{pass_id}_before.ll"
         after_file  = f"pass_{pass_id}_after.ll"
-        
         before_lines = read_file_lines(before_file)
         after_lines = read_file_lines(after_file)
-    
+        
     original_code, modified_code, added, removed = get_diffed_lines(before_lines, after_lines)
     
     return {
@@ -100,7 +90,6 @@ def get_pass_data(pass_id: int):
     }
 
 class LogPayload(BaseModel):
-    # Support 'raw_logs' or 'logs' depending on frontend execution preferences
     logs: str = None
     raw_logs: str = None
 
@@ -109,19 +98,14 @@ def upload_logs(payload: LogPayload):
     global PASSES
     content = payload.raw_logs if payload.raw_logs else payload.logs
     content_length = len(content) if content else 0
-    
-    # Standard output explicitly confirming to standard UI flow
-    print(f"\n[SERVER] Successfully received LLVM log payload! Total characters: {content_length}")
+    print(f"\n[SERVER] Received target LLVM log payload! Total characters: {content_length}")
     
     if content:
         # More flexible match pattern parsing all available pass headers
         pattern = r"\*\*\* IR Dump After (.*?)\s*\*\*\*"
         parts = re.split(pattern, content)
-        
         new_passes = []
-        
         if len(parts) == 1:
-            # Fallback for unformatted raw dumps
             new_passes.append({
                 "id": 1,
                 "name": "Raw LLVM Dump (Unparsed)",
@@ -135,7 +119,6 @@ def upload_logs(payload: LogPayload):
                 if i + 1 < len(parts):
                     full_pass_desc = parts[i].strip()
                     code_block = parts[i+1].strip()
-                    
                     if " on " in full_pass_desc:
                         p_name, t_func = full_pass_desc.split(" on ", 1)
                     else:
@@ -158,3 +141,44 @@ def upload_logs(payload: LogPayload):
         "status": "success",
         "message": f"Successfully received {content_length} characters and cached {len(PASSES)} passes."
     }
+
+# ============================================================== #
+# === NEW AI INTEGRATION LOGIC: EXPERT EXPLAINER ENDPOINT ===    #
+# ============================================================== #
+class ExplainPayload(BaseModel):
+    original_code: List[Dict[str, Any]]
+    modified_code: List[Dict[str, Any]]
+
+@app.post("/api/explain")
+def explain_optimization(payload: ExplainPayload):
+    try:
+        # Natively reads the GEMINI_API_KEY from os environment 
+        client = genai.Client()
+        
+        # Safely scrape only the targeted logic to keep formatting perfect 
+        removed_lines = [line['text'] for line in payload.original_code if line.get('status') == 'removed']
+        added_lines = [line['text'] for line in payload.modified_code if line.get('status') == 'added']
+        
+        prompt = f"""
+        You are an elite C++ compiler engineer instructing a student analyzing LLVM optimization passes.
+        
+        Here are the exact Intermediate Representation (IR) instructions REMOVED:
+        {chr(10).join(removed_lines) if removed_lines else "None"}
+        
+        Here are the exact IR instructions ADDED:
+        {chr(10).join(added_lines) if added_lines else "None"}
+        
+        Please explain exactly what this specific compiler optimization pass did based on these code modifications. Respond in extremely simple, practical, and heavily jargon-free English so a junior beginner understands immediately. Keep it beautifully concise.
+        """
+        
+        # Access the ultra-fast flash model via prompt injection
+        response = client.models.generate_content(
+            model='gemini-3.6-flash',
+            contents=prompt,
+        )
+        return {"explanation": response.text}
+        
+    except Exception as e:
+        print(f"Gemini Exception Thrown: {e}")
+        # Return generic 500 error passing standard python exception
+        raise HTTPException(status_code=500, detail=str(e))
