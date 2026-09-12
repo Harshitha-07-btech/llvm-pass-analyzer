@@ -11,12 +11,16 @@ export default function CodeViewer({ originalCode, modifiedCode }) {
         setErrorMsg(null);
 
         try {
+            // Natively serialize the UI Line objects cleanly into raw raw strings matching Python Pydantic schemas exactly!
+            const rawOriginalIR = originalCode.map(obj => obj.text).join('\n');
+            const rawModifiedIR = modifiedCode.map(obj => obj.text).join('\n');
+
             const response = await fetch('http://127.0.0.1:8000/api/explain', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    original_code: originalCode,
-                    modified_code: modifiedCode
+                    original_ir: rawOriginalIR,
+                    modified_ir: rawModifiedIR
                 })
             });
 
@@ -24,21 +28,26 @@ export default function CodeViewer({ originalCode, modifiedCode }) {
                 let backendErrorMsg = `HTTP Request failed with status ${response.status}`;
                 try {
                     const errorData = await response.json();
-                    // FastAPI typically natively throws errors wrapped inside a 'detail' field
+
+                    // FastAPI natively throws errors wrapped inside a 'detail' field. 
+                    // Crucial Fix: Standardize array/object payloads (like native 422 validations) strictly into readable strings!
                     if (errorData && errorData.detail) {
-                        backendErrorMsg = errorData.detail;
+                        backendErrorMsg = typeof errorData.detail === 'string'
+                            ? errorData.detail
+                            : JSON.stringify(errorData.detail);
                     } else if (errorData && errorData.message) {
                         backendErrorMsg = errorData.message;
                     }
                 } catch (parseErr) {
-                    // If the backend crashed violently and did not return valid JSON
                     backendErrorMsg = "Failed to fetch AI explanation: Server did not return a valid JSON error payload.";
                 }
+
                 throw new Error(backendErrorMsg);
             }
 
             const data = await response.json();
             setExplanation(data.explanation);
+
         } catch (err) {
             setErrorMsg(err.message);
         } finally {
@@ -69,7 +78,7 @@ export default function CodeViewer({ originalCode, modifiedCode }) {
             {/* Pop-up Modals triggered specifically over the code viewer on Success/Fail states */}
             {explanation && (
                 <div style={{ margin: '16px', padding: '20px', backgroundColor: '#064E3B', color: '#A7F3D0', borderRadius: '8px' }}>
-                    <strong style={{ display: 'block', marginBottom: '8px', color: '#10B981' }}>Gemini 2.5 Insights:</strong>
+                    <strong style={{ display: 'block', marginBottom: '8px', color: '#10B981' }}>Gemini Insights:</strong>
                     <p style={{ lineHeight: 1.6, fontSize: '0.95rem', whiteSpace: 'pre-wrap' }}>{explanation}</p>
                 </div>
             )}

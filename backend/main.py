@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import os
 import difflib
 import re
+import subprocess
 
 # Safely load the environment variables from the .env file
 load_dotenv()
@@ -56,9 +57,6 @@ def get_diffed_lines(before_lines: List[str], after_lines: List[str]):
     return original_ir, modified_ir, lines_added, lines_removed
 
 
-# ============================================================== #
-# === NATIVE CFG BASIC BLOCK PARSER LOGIC FOR THE ENDPOINT   === #
-# ============================================================== #
 def extract_blocks_from_diff(diff_lines: List[Dict[str, str]]) -> List[Dict[str, Any]]:
     blocks = []
     current_block = {"id": "entry", "label": "entry", "instructions": [], "successors": []}
@@ -76,7 +74,6 @@ def extract_blocks_from_diff(diff_lines: List[Dict[str, str]]) -> List[Dict[str,
 
     for line_obj in diff_lines:
         text = line_obj["text"].strip()
-        # Identify standard LLVM label markers mapped cleanly against diff outputs
         if (text.endswith(':') and '=' not in text) or re.match(r'^[-a-zA-Z0-9_\.]+:$', text) or text.startswith('; <label>:'):
             push_block()
             clean_id = text.replace(':', '')
@@ -90,13 +87,11 @@ def extract_blocks_from_diff(diff_lines: List[Dict[str, str]]) -> List[Dict[str,
 
 @app.get("/api/passes")
 def get_passes():
-    """Endpoint serving the cached dynamic pass list for the UI Sidebar."""
     return PASSES
 
 
 @app.get("/api/pass/{pass_id}")
 def get_pass_data(pass_id: int):
-    """Endpoint isolating the correct code payload for the requested pass."""
     pass_info = next((p for p in PASSES if p["id"] == pass_id), None)
     if not pass_info:
         raise HTTPException(status_code=404, detail="Pass not found")
@@ -113,7 +108,6 @@ def get_pass_data(pass_id: int):
         
     original_code, modified_code, added, removed = get_diffed_lines(before_lines, after_lines)
     
-    # Parse native blocks dynamically and securely on the backend server engine!
     original_blocks = extract_blocks_from_diff(original_code)
     modified_blocks = extract_blocks_from_diff(modified_code)
     
@@ -132,6 +126,56 @@ def get_pass_data(pass_id: int):
     }
 
 
+# ============================================================== #
+# === NEW LOGIC: SCOREBOARD PIPELINE SUMMARY TARGET          === #
+# ============================================================== #
+@app.get("/api/optimization-summary")
+def get_optimization_summary():
+    summary_passes = []
+    total_added = 0
+    total_removed = 0
+    total_net = 0
+    
+    for pass_info in PASSES:
+        # Explicitly skip the foundational raw initialization dump map gracefully 
+        if pass_info["id"] == 1 or pass_info["pass_name"] == "Raw Output":
+            continue
+            
+        pass_id = pass_info["id"]
+        
+        # Grab immediately prior payload to diff exactly natively 
+        prev_info = next((p for p in PASSES if p["id"] == pass_id - 1), None)
+        before_lines = prev_info["code_block"].split('\n') if prev_info else []
+        after_lines = pass_info["code_block"].split('\n')
+        
+        # Tap into existing diff processing module
+        _, _, added, removed = get_diffed_lines(before_lines, after_lines)
+        net = added - removed
+        
+        # Exclusively map optimization passes that actually mutated underlying compilation trees logically 
+        if added > 0 or removed > 0:
+            summary_passes.append({
+                "id": pass_id,
+                "passName": pass_info["pass_name"],
+                "target": pass_info["target_function"],
+                "added": added,
+                "removed": removed,
+                "net": net
+            })
+            total_added += added
+            total_removed += removed
+            total_net += net
+            
+    return {
+        "passes": summary_passes,
+        "totals": {
+            "added": total_added,
+            "removed": total_removed,
+            "net": total_net
+        }
+    }
+
+
 class LogPayload(BaseModel):
     logs: str = None
     raw_logs: str = None
@@ -141,10 +185,8 @@ def upload_logs(payload: LogPayload):
     global PASSES
     content = payload.raw_logs if payload.raw_logs else payload.logs
     content_length = len(content) if content else 0
-    print(f"\n[SERVER] Received target LLVM log payload! Total characters: {content_length}")
     
     if content:
-        # More flexible match pattern parsing all available pass headers
         pattern = r"\*\*\* IR Dump After (.*?)\s*\*\*\*"
         parts = re.split(pattern, content)
         new_passes = []
@@ -178,43 +220,96 @@ def upload_logs(payload: LogPayload):
                     pass_id_counter += 1
                 
         PASSES = new_passes
-        print(f"[SERVER] Regex mapped {len(PASSES)} individual passes into structured JSON.")
     
     return {
         "status": "success",
         "message": f"Successfully received {content_length} characters and cached {len(PASSES)} passes."
     }
 
+class CompilePayload(BaseModel):
+    source_code: str
+
+@app.post("/api/compile")
+def compile_live_code(payload: CompilePayload):
+    global PASSES
+    
+    script_path = os.path.join(os.path.dirname(__file__), 'live_test.cpp')
+    with open(script_path, 'w') as f:
+        f.write(payload.source_code)
+        
+    clang_path = r"C:\Program Files\LLVM\bin\clang++.exe"
+    
+    try:
+        process = subprocess.run(
+            [clang_path, "-O3", "-mllvm", "-print-after-all", script_path, "-c"],
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        
+        content = process.stderr
+        
+        if not content:
+            raise HTTPException(status_code=500, detail="Compilation successfully executed, but LLVM completely failed to natively pipe expected tracking traces into STDERR! Verify compiler flags natively!")
+            
+        pattern = r"\*\*\* IR Dump After (.*?)\s*\*\*\*"
+        parts = re.split(pattern, content)
+        new_passes = []
+        
+        pass_id_counter = 1
+        for i in range(1, len(parts), 2):
+            if i + 1 < len(parts):
+                full_pass_desc = parts[i].strip()
+                code_block = parts[i+1].strip()
+                if " on " in full_pass_desc:
+                    p_name, t_func = full_pass_desc.split(" on ", 1)
+                else:
+                    p_name = full_pass_desc
+                    t_func = "module"
+                    
+                new_passes.append({
+                    "id": pass_id_counter,
+                    "name": full_pass_desc,
+                    "pass_name": p_name.strip(),
+                    "target_function": t_func.strip(),
+                    "code_block": code_block
+                })
+                pass_id_counter += 1
+                
+        PASSES = new_passes
+        
+        return {
+            "status": "success", 
+            "message": f"Natively compiled React code completely! Populated {len(PASSES)} targeted passes into the dashboard cache successfully."
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Native compiler subprocess explicitly failed logic check. Verify Clang location exactly: {e}")
+
+
 # ============================================================== #
-# === NEW AI INTEGRATION LOGIC: EXPERT EXPLAINER ENDPOINT ===    #
+# === NEW AI INTEGRATION LOGIC: EXPERT EXPLAINER ENDPOINT    === #
 # ============================================================== #
 class ExplainPayload(BaseModel):
-    original_code: List[Dict[str, Any]]
-    modified_code: List[Dict[str, Any]]
+    original_ir: str
+    modified_ir: str
 
 @app.post("/api/explain")
 def explain_optimization(payload: ExplainPayload):
     try:
-        # Natively reads the GEMINI_API_KEY from os environment 
         client = genai.Client()
         
-        # Safely scrape only the targeted logic to keep formatting perfect 
-        removed_lines = [line['text'] for line in payload.original_code if line.get('status') == 'removed']
-        added_lines = [line['text'] for line in payload.modified_code if line.get('status') == 'added']
-        
         prompt = f"""
-        You are an elite C++ compiler engineer instructing a student analyzing LLVM optimization passes.
+You are a compiler expert. Look at this before and after LLVM IR code. Explain exactly what optimization the compiler performed here. Keep the explanation in very simple English, avoid heavy jargon, and use bullet points for clarity.
+
+Before Optimization (Original IR):
+{payload.original_ir}
+
+After Optimization (Modified IR):
+{payload.modified_ir}
+"""
         
-        Here are the exact Intermediate Representation (IR) instructions REMOVED:
-        {chr(10).join(removed_lines) if removed_lines else "None"}
-        
-        Here are the exact IR instructions ADDED:
-        {chr(10).join(added_lines) if added_lines else "None"}
-        
-        Please explain exactly what this specific compiler optimization pass did based on these code modifications. Respond in extremely simple, practical, and heavily jargon-free English so a junior beginner understands immediately. Keep it beautifully concise.
-        """
-        
-        # Access the ultra-fast flash model via prompt injection
+        # Access the universally available native standard model alias explicitly avoiding v1beta access drops
         response = client.models.generate_content(
             model='gemini-3.6-flash',
             contents=prompt,
@@ -222,6 +317,12 @@ def explain_optimization(payload: ExplainPayload):
         return {"explanation": response.text}
         
     except Exception as e:
-        print(f"Gemini Exception Thrown: {e}")
-        # Return generic 500 error passing standard python exception
-        raise HTTPException(status_code=500, detail=str(e))
+        # Heavily expanded python-level exception wrapper explicitly filtering context hooks 
+        error_str = str(e)
+        if "API_KEY_INVALID" in error_str or "API key not valid" in error_str:
+            detail_msg = "Invalid or Missing Google Gemini API Key. Please verify your .env file natively."
+        else:
+            detail_msg = f"Gemini AI SDK Execution failed: {error_str}"
+            
+        print(f"Gemini Exception Thrown: {detail_msg}")
+        raise HTTPException(status_code=500, detail=detail_msg)
