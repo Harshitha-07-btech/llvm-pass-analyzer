@@ -55,10 +55,44 @@ def get_diffed_lines(before_lines: List[str], after_lines: List[str]):
             continue
     return original_ir, modified_ir, lines_added, lines_removed
 
+
+# ============================================================== #
+# === NATIVE CFG BASIC BLOCK PARSER LOGIC FOR THE ENDPOINT   === #
+# ============================================================== #
+def extract_blocks_from_diff(diff_lines: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    blocks = []
+    current_block = {"id": "entry", "label": "entry", "instructions": [], "successors": []}
+    
+    def push_block():
+        if current_block["instructions"] or current_block["label"] != "entry":
+            if current_block["instructions"]:
+                last_line = current_block["instructions"][-1]["text"].strip()
+                if last_line.startswith("br ") or last_line.startswith("switch ") or last_line.startswith("invoke "):
+                    matches = re.findall(r'label %([a-zA-Z0-9_.-]+)', last_line)
+                    current_block["successors"] = matches
+                elif last_line.startswith("ret "):
+                    current_block["successors"] = ["Return"]
+            blocks.append(current_block.copy())
+
+    for line_obj in diff_lines:
+        text = line_obj["text"].strip()
+        # Identify standard LLVM label markers mapped cleanly against diff outputs
+        if (text.endswith(':') and '=' not in text) or re.match(r'^[-a-zA-Z0-9_\.]+:$', text) or text.startswith('; <label>:'):
+            push_block()
+            clean_id = text.replace(':', '')
+            current_block = {"id": clean_id, "label": text, "instructions": [], "successors": []}
+        elif text != "":
+            current_block["instructions"].append(line_obj)
+            
+    push_block()
+    return blocks
+
+
 @app.get("/api/passes")
 def get_passes():
     """Endpoint serving the cached dynamic pass list for the UI Sidebar."""
     return PASSES
+
 
 @app.get("/api/pass/{pass_id}")
 def get_pass_data(pass_id: int):
@@ -79,6 +113,10 @@ def get_pass_data(pass_id: int):
         
     original_code, modified_code, added, removed = get_diffed_lines(before_lines, after_lines)
     
+    # Parse native blocks dynamically and securely on the backend server engine!
+    original_blocks = extract_blocks_from_diff(original_code)
+    modified_blocks = extract_blocks_from_diff(modified_code)
+    
     return {
         "pass_id": pass_id,
         "pass_name": pass_info["name"],
@@ -86,8 +124,13 @@ def get_pass_data(pass_id: int):
         "lines_removed": removed,
         "net_change": added - removed,
         "original_code": original_code,
-        "modified_code": modified_code
+        "modified_code": modified_code,
+        "cfg_data": {
+             "original_blocks": original_blocks,
+             "modified_blocks": modified_blocks
+        }
     }
+
 
 class LogPayload(BaseModel):
     logs: str = None

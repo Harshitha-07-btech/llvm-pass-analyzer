@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import StatsPanel from './components/StatsPanel';
+
 import CodeViewer from './components/CodeViewer';
+import CFGViewer from './components/CFGViewer'; // Our powerful new visualization block!
 import LogTerminal from './components/LogTerminal';
 
 export default function App() {
@@ -10,6 +12,9 @@ export default function App() {
   const [passData, setPassData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [logs, setLogs] = useState([{ type: 'info', msg: '[INFO] Initializing dashboard...' }]);
+
+  // Implicitly handle toggle states routing views organically
+  const [viewMode, setViewMode] = useState('diff'); // default 'diff', switches to 'cfg'
 
   const addLog = (msg, type = 'info') => {
     setLogs(prev => [...prev, { type, msg }]);
@@ -90,11 +95,37 @@ export default function App() {
               onStepForward={handleStepForward}
               onStepBackward={handleStepBackward}
             />
-            {/* The CodeViewer component properly rendering instead of the old setup */}
-            <CodeViewer
-              originalCode={passData.original_code}
-              modifiedCode={passData.modified_code}
-            />
+
+            {/* View Mode Toggle Header Layer */}
+            <div style={{ backgroundColor: '#1A2234', padding: '10px 16px', display: 'flex', gap: '16px', borderBottom: '1px solid #334155' }}>
+              <span style={{ color: '#94A3B8', fontSize: '0.85rem', fontWeight: 600, alignSelf: 'center', letterSpacing: '1px' }}>WORKSPACE VISUALIZATION:</span>
+              <button
+                onClick={() => setViewMode('diff')}
+                className="nav-btn"
+                style={{ backgroundColor: viewMode === 'diff' ? '#3B82F6' : 'transparent', color: '#fff', fontSize: '0.85rem' }}>
+                Standard Code Diff
+              </button>
+              <button
+                onClick={() => setViewMode('cfg')}
+                className="nav-btn"
+                style={{ backgroundColor: viewMode === 'cfg' ? '#10B981' : 'transparent', color: '#fff', fontSize: '0.85rem' }}>
+                Control Flow Graph (CFG)
+              </button>
+            </div>
+
+            {/* Dynamic Rendering depending exclusively on user's mode variable setting */}
+            {viewMode === 'diff' ? (
+              <CodeViewer
+                originalCode={passData.original_code}
+                modifiedCode={passData.modified_code}
+              />
+            ) : (
+              <CFGViewer
+                originalCode={passData.original_code}
+                modifiedCode={passData.modified_code}
+              />
+            )}
+
           </>
         )}
         <LogTerminal logs={logs} onClearLogs={clearLogs} />
