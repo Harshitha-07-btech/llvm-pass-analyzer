@@ -1,28 +1,18 @@
-int analyze_data_stream(int count) {
-    // 1. Dead memory array (Triggers SROA & Dead Store Elimination)
-    int temporary_cache[4] = {10, 20, 30, 40};
-    int unused_metric = 8888;
-
-    int total_score = 0;
-
-    // 2. Loop with conditional branch (Triggers CFG Branching & Loop Optimizations)
-    for (int i = 0; i < count; ++i) {
+int matrix_calc(int base, int limit) {
+    int total = 0;
+    for (int i = 0; i < limit; i++) {
         if (i % 2 == 0) {
-            total_score += (i * 2);
+            total += base * i;
         } else {
-            total_score += 1;
+            total -= base + i;
         }
     }
-
-    // 3. Unreachable branch (Triggers SimplifyCFG pruning)
-    if (total_score < -1000) {
-        return unused_metric;
+    if (total > 1000) {
+        return 1;
     }
-
-    return total_score;
+    return 0;
 }
 
 int main() {
-    // 4. Constant parameter (Triggers InlinerPass & Constant Folding)
-    return analyze_data_stream(8);
+    return matrix_calc(5, 10);
 }
