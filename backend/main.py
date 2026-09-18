@@ -237,7 +237,7 @@ def compile_live_code(payload: CompilePayload):
     with open(script_path, 'w') as f:
         f.write(payload.source_code)
         
-    clang_path = r"C:\Program Files\LLVM\bin\clang++.exe"
+    clang_path = "clang++" if os.name != "nt" else r"C:\Program Files\LLVM\bin\clang++.exe"
     
     try:
         process = subprocess.run(
